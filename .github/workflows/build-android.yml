@@ -1,0 +1,111 @@
+name: Build Kurt Dhylan Moto Shop Inventory V4 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Extract source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          ZIP_FILE="$(find . -type f -name 'KurtDhylanMotoShopInventoryV3_Source.zip' -print -quit)"
+
+          if [ -z "${ZIP_FILE}" ]; then
+            echo "ERROR: KurtDhylanMotoShopInventoryV3_Source.zip was not found."
+            exit 1
+          fi
+
+          echo "Using source ZIP: ${ZIP_FILE}"
+          unzip -q -o "${ZIP_FILE}" -d extracted
+
+          echo "Extracted project files:"
+          find extracted -maxdepth 6 -type f | sort
+
+      - name: Locate MAUI .csproj
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t PROJECTS < <(find extracted -type f -name '*.csproj' -print)
+
+          if [ "${#PROJECTS[@]}" -eq 0 ]; then
+            echo "ERROR: No .csproj file was found after extraction."
+            exit 1
+          fi
+
+          if [ "${#PROJECTS[@]}" -gt 1 ]; then
+            echo "ERROR: More than one .csproj was found:"
+            printf '%s
+' "${PROJECTS[@]}"
+            exit 1
+          fi
+
+          PROJECT_PATH="${PROJECTS[0]}"
+          echo "PROJECT_PATH=${PROJECT_PATH}" >> "$GITHUB_ENV"
+          echo "Found MAUI project: ${PROJECT_PATH}"
+
+      - name: Install MAUI Android workload
+        run: dotnet workload install maui-android --skip-manifest-update
+
+      - name: Restore MAUI project
+        run: dotnet restore "${{ env.PROJECT_PATH }}"
+
+      - name: Publish Android APK
+        run: >
+          dotnet publish "${{ env.PROJECT_PATH }}"
+          -f net10.0-android
+          -c Release
+          --no-restore
+          -p:AndroidPackageFormat=apk
+          -p:AndroidKeyStore=false
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p artifacts
+
+          mapfile -t APKS < <(find extracted -type f -name '*.apk' -print)
+
+          if [ "${#APKS[@]}" -eq 0 ]; then
+            echo "ERROR: APK was not generated."
+            echo "Build output:"
+            find extracted -type f \( -name '*.apk' -o -name '*.aab' \) -print || true
+            exit 1
+          fi
+
+          APK="${APKS[0]}"
+          echo "APK found: ${APK}"
+          cp "${APK}" "artifacts/KurtDhylanMotoShopInventoryV3.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KurtDhylanMotoShopInventoryV3-APK
+          path: artifacts/KurtDhylanMotoShopInventoryV3.apk
+          if-no-files-found: error
+          
